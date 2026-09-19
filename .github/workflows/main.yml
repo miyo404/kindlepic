@@ -1,0 +1,75 @@
+# ============================================================
+# Kindle 新闻聚合 —— GitHub Actions 自动任务
+# 作用：每隔一段时间自动运行 scripts/generate.py，
+#       抓取 sources.txt 里配置的新闻源，
+#       生成 RSS 文件（feeds/，给新闻下载器订阅）
+#       和壁纸图片（pic/richang.png，给 Kindle 休眠屏保），
+#       再把生成结果提交回仓库，Kindle 通过 GitHub Pages 拉取。
+# ============================================================
+
+# workflow 显示名，会出现在 GitHub 网页 Actions 左侧栏
+name: Generate and Upload
+
+on:
+  # 定时触发。cron 用的是 UTC 时间（北京时间 = UTC+8），最小粒度 5 分钟
+  # '*/5 * * * *' = 每 5 分钟一次；GitHub 免费版不保证准时，通常有几分钟延迟
+  schedule:
+    - cron: '*/5 * * * *'
+  # 允许在 Actions 页面手动点 “Run workflow” 立即触发一次
+  workflow_dispatch:
+
+jobs:
+  build:
+    # 在 GitHub 免费提供的最新 Ubuntu 虚拟机上运行
+    runs-on: ubuntu-latest
+
+    steps:
+      # 第1步：把仓库代码检出（下载）到虚拟机
+      - uses: actions/checkout@v4
+
+      # 第2步：把虚拟机时区设为北京时间，保证壁纸/文件里的时间戳正确
+      - name: Set timezone to Asia/Shanghai
+        run: sudo timedatectl set-timezone Asia/Shanghai
+
+      # 第3步：安装 Python 运行环境
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 第4步：安装脚本依赖的库和中文字体
+      - name: Install dependencies
+        run: |
+          # requests=联网抓取；pillow=绘制壁纸；beautifulsoup4=解析 tophub 网页
+          pip install requests pillow beautifulsoup4
+          sudo apt-get update
+          # 中文字体，不装的话壁纸上的中文会变成方块
+          sudo apt-get install -y fonts-noto-cjk
+
+      # 第5步：运行主脚本，产出 feeds/*.xml 和 pic/richang.png
+      - name: Generate feeds and wallpaper
+        run: python scripts/generate.py
+
+      # 第6步：把生成结果提交并推送回仓库
+      - name: Commit and push
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          # 只跟踪这三类：源配置、RSS 产物、壁纸产物
+          git add sources.txt feeds/ pic/
+
+          # —— 防止提交历史无限膨胀（替代旧版那段有问题的 rebase 脚本）——
+          # 每 5 分钟一次提交，一天就是 288 次，二进制 PNG 会让仓库越来越大。
+          # 思路：机器人的自动提交始终只保留 1 个，在原地滚动更新。
+          #   · 如果最新提交的作者就是机器人，把本次改动合并(amend)进它；
+          #   · 如果最新提交是你本人手动改的，则新建一个提交，绝不动你的历史。
+          if git log -1 --format='%an' | grep -q "GitHub Actions"; then
+            git commit --amend -m "自动更新 $(date)"
+          else
+            git commit -m "自动更新 $(date)" || echo "nothing to commit"
+          fi
+
+          # amend 改写了最新提交，需要 force 推送
+          git push --force origin main
+        env:
+          # GitHub 自动签发的临时令牌，仅限本仓库、本次运行，无需手动配置
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
