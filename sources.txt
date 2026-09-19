@@ -1,16 +1,15 @@
 # 新闻源配置
-# 格式：类型<TAB>名称<TAB>URL<TAB>条数
+# 格式：类型<TAB>名称<TAB>URL<TAB>条数<TAB>抓正文(1=抓,0=不抓)
 # 类型：
-#   rss  = 官方/第三方 RSS，脚本解析后生成 feeds/<名称>.xml（新闻下载器订阅读全文）
-#   html = 抓 tophub 网页，只取标题，用于壁纸
-# 以 # 开头的行是注释，不会被读取
-# 想加源？加一行；想删源？注释掉或删掉；想换源？改 URL
+#   rss  = 官方/第三方 RSS，自带正文，脚本解析后生成 feeds/<名称>.xml
+#   html = 抓 tophub 网页标题，再访问每条链接抓正文
+# 第5列：1=抓正文（epub里直接有全文），0=不抓（只有标题）
+# 以 # 开头的行是注释
 
-# === 壁纸源（抓 tophub 热榜标题）===
-html	澎湃热榜	https://tophub.today/n/wWmoO5Rd4E	10
-html	腾讯新闻	https://tophub.today/n/12owgX0oNV	10
-html	36kr	https://tophub.today/n/Q1Vd5Ko85R	10
+# === 热榜源（抓 tophub + 访问链接抓正文）===
+html	澎湃热榜	https://tophub.today/n/wWmoO5Rd4E	10	1
+html	36kr	https://tophub.today/n/Q1Vd5Ko85R	10	1
 
-# === RSS 源（生成 XML 供新闻下载器订阅）===
-rss	少数派	https://sspai.com/feed	10
-rss	知乎日报	https://plink.anyfeeder.com/zhihu/daily	10
+# === RSS 源（自带正文）===
+rss	少数派	https://sspai.com/feed	10	0
+rss	知乎日报	https://plink.anyfeeder.com/zhihu/daily	10	0
