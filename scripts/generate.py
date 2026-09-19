@@ -37,11 +37,13 @@ def load_sources(path):
             if len(parts) < 4:
                 continue
             stype, name, url, limit = parts[0], parts[1], parts[2], parts[3]
+            # 第5列：是否抓正文（1=抓），没有则默认不抓
+            fetch_content = (len(parts) > 4 and parts[4].strip() == '1')
             try:
                 limit = int(limit)
             except Exception:
                 limit = 10
-            sources.append((stype, name, url, limit))
+            sources.append((stype, name, url, limit, fetch_content))
     return sources
 
 
@@ -111,6 +113,39 @@ def fetch_tophub(url, limit):
     except Exception as e:
         print(f'[WARN] tophub 抓取失败 {url}: {e}')
         return []
+
+
+# ---------- 抓文章正文 ----------
+def fetch_article_text(url):
+    """访问文章URL，提取正文纯文本。抓不到返回空字符串。
+    策略：先试常见正文容器选择器，失败再取body里最长的几段。"""
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=25)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, 'html.parser')
+        # 去掉导航/广告/脚本等无关标签
+        for t in soup(['script', 'style', 'nav', 'footer', 'header', 'aside']):
+            t.decompose()
+        # 常见正文容器，挨个试
+        for sel in ['article', '.article-content', '.news_txt', '#articleContent',
+                    '.article-content-wrap', '.content', '.article_content', '.entry-content',
+                    '.show_text', '.u-area']:
+            el = soup.select_one(sel)
+            if el:
+                text = el.get_text('\n', strip=True)
+                if len(text) > 150:
+                    return text[:4000]
+        # fallback：取body里最长的文本块
+        if soup.body:
+            text = soup.body.get_text('\n', strip=True)
+            blocks = [b for b in text.split('\n') if len(b) > 100]
+            if blocks:
+                blocks.sort(key=len, reverse=True)
+                return '\n'.join(blocks[:8])[:4000]
+        return ''
+    except Exception as e:
+        print(f'    [WARN] 正文抓取失败 {url}: {e}')
+        return ''
 
 
 # ---------- 生成 RSS XML ----------
@@ -247,7 +282,7 @@ def main():
 
     wallpaper_groups = []  # (名称, [(标题, 热度或''), ...])
 
-    for stype, name, url, limit in sources:
+    for stype, name, url, limit, fetch_content in sources:
         print(f'\n--- {name} ({stype}) ---')
         if stype == 'rss':
             items = fetch_rss(url, limit)
@@ -262,9 +297,17 @@ def main():
         elif stype == 'html':
             items = fetch_tophub(url, limit)
             print(f'  tophub: {len(items)} 条')
-            if items:
-                # html 源也生成 RSS XML：title + 原文链接，正文靠新闻下载器抓原文
-                rss_items = [(t, l, '') for t, l in items]
+            rss_items = []
+            for title, link in items:
+                desc = ''
+                # 如果配置要抓正文，访问每条链接抓正文
+                if fetch_content and link:
+                    print(f'    抓正文: {title[:25]}...')
+                    desc = fetch_article_text(link)
+                    if not desc:
+                        desc = '（正文抓取失败，点链接查看原文）'
+                rss_items.append((title, link, desc))
+            if rss_items:
                 xml = build_rss_xml(name, rss_items, url)
                 xml_path = os.path.join(FEEDS_DIR, f'{name}.xml')
                 with open(xml_path, 'w', encoding='utf-8') as f:
